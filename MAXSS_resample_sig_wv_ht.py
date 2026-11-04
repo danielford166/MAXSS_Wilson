@@ -1483,15 +1483,31 @@ def MAXSS_resample_main(
                 else:
                     wind_lon_for_crop = wind_lon
 
+                # Convert wind longitudes to 0-360 if swh_lon_full is in 0-360 convention
+                swh_is_360 = np.min(swh_lon_full) >= 0 and np.max(swh_lon_full) > 180
+                
+                if swh_is_360:
+                    wind_lon_for_crop = (wind_lon + 360) % 360
+                else:
+                    wind_lon_for_crop = wind_lon
+
                 # Crop bounding box with +0.5 degree buffer
                 lat_indices = np.where(
                     (swh_lat_full >= min(wind_lat) - 0.5)
                     & (swh_lat_full <= max(wind_lat) + 0.5)
                 )[0]
-                lon_indices = np.where(
-                    (swh_lon_full >= min(wind_lon_for_crop) - 0.5)
-                    & (swh_lon_full <= max(wind_lon_for_crop) + 0.5)
-                )[0]
+                
+                # Check if storm crosses the 0/360 seam (min > max in 0-360 space)
+                if swh_is_360 and (min(wind_lon_for_crop) > max(wind_lon_for_crop)):
+                    lon_indices = np.where(
+                        (swh_lon_full >= min(wind_lon_for_crop) - 0.5)
+                        | (swh_lon_full <= max(wind_lon_for_crop) + 0.5)
+                    )[0]
+                else:
+                    lon_indices = np.where(
+                        (swh_lon_full >= min(wind_lon_for_crop) - 0.5)
+                        & (swh_lon_full <= max(wind_lon_for_crop) + 0.5)
+                    )[0]
 
                 if len(lat_indices) == 0 or len(lon_indices) == 0:
                   print(
@@ -1504,11 +1520,11 @@ def MAXSS_resample_main(
                 lon_start, lon_end = min(lon_indices), max(lon_indices) + 1
 
                 swh_lat_sub = swh_lat_full[lat_start:lat_end]
-                swh_lon_sub = swh_lon_full[lon_start:lon_end]
+                swh_lon_sub = swh_lon_full[lon_start:lon_end].copy()
 
-                # Convert cropped sub-longitudes back to matching wind_lon (-180 to 180) scale
-                if swh_is_360 and np.any(swh_lon_sub > 180):
-                    swh_lon_sub = np.where(swh_lon_sub > 180, swh_lon_sub - 360, swh_lon_sub)
+                # Fix Monotonicity: Unwrap longitudes crossing the 0/360 seam (e.g., [358, 359, 0, 1] -> [358, 359, 360, 361])
+                if np.any(np.diff(swh_lon_sub) < 0):
+                    swh_lon_sub[swh_lon_sub < swh_lon_sub[0]] += 360
 
                 flip_lat = swh_lat_sub[0] > swh_lat_sub[-1]
                 flip_lon = swh_lon_sub[0] > swh_lon_sub[-1]
@@ -1518,9 +1534,13 @@ def MAXSS_resample_main(
                 if flip_lon:
                   swh_lon_sub = swh_lon_sub[::-1]
 
-                # Prepare paired 2D target points (N, 2)
+                # Ensure target longitudes match the unwrapped coordinate scale
+                target_lon_calc = wind_lon_for_crop.copy()
+                if swh_is_360 and np.any(np.diff(target_lon_calc) < 0):
+                    target_lon_calc[target_lon_calc < target_lon_calc[0]] += 360
+
                 target_lat_2d, target_lon_2d = np.meshgrid(
-                    wind_lat, wind_lon, indexing="ij"
+                    wind_lat, target_lon_calc, indexing="ij"
                 )
                 target_points = np.column_stack(
                     (target_lat_2d.ravel(), target_lon_2d.ravel())
