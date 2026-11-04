@@ -1475,14 +1475,22 @@ def MAXSS_resample_main(
                 )
                 swh_sample_nc.close()
 
+                # Convert wind longitudes to 0-360 if swh_lon_full is in 0-360 convention
+                swh_is_360 = np.min(swh_lon_full) >= 0 and np.max(swh_lon_full) > 180
+                
+                if swh_is_360:
+                    wind_lon_for_crop = (wind_lon + 360) % 360
+                else:
+                    wind_lon_for_crop = wind_lon
+
                 # Crop bounding box with +0.5 degree buffer
                 lat_indices = np.where(
                     (swh_lat_full >= min(wind_lat) - 0.5)
                     & (swh_lat_full <= max(wind_lat) + 0.5)
                 )[0]
                 lon_indices = np.where(
-                    (swh_lon_full >= min(wind_lon) - 0.5)
-                    & (swh_lon_full <= max(wind_lon) + 0.5)
+                    (swh_lon_full >= min(wind_lon_for_crop) - 0.5)
+                    & (swh_lon_full <= max(wind_lon_for_crop) + 0.5)
                 )[0]
 
                 if len(lat_indices) == 0 or len(lon_indices) == 0:
@@ -1497,6 +1505,10 @@ def MAXSS_resample_main(
 
                 swh_lat_sub = swh_lat_full[lat_start:lat_end]
                 swh_lon_sub = swh_lon_full[lon_start:lon_end]
+
+                # Convert cropped sub-longitudes back to matching wind_lon (-180 to 180) scale
+                if swh_is_360 and np.any(swh_lon_sub > 180):
+                    swh_lon_sub = np.where(swh_lon_sub > 180, swh_lon_sub - 360, swh_lon_sub)
 
                 flip_lat = swh_lat_sub[0] > swh_lat_sub[-1]
                 flip_lon = swh_lon_sub[0] > swh_lon_sub[-1]
